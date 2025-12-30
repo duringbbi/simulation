@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>비휴전 냉각기 PT 시뮬레이션 (v14.0 Real Fix)</title>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <style>
+    :root{
+      --bg: #ffffff;
+      --text: #1e293b;
+      --primary: #2563eb;
+      --gray-line: #cbd5e1;
+      --cold: #3b82f6;
+      --hot: #f97316;
+      --drain: #10b981;
+      --stroke-color: #475569;
+      --glass: rgba(255, 255, 255, 0.95);
+      --shadow: 0 -4px 20px rgba(0,0,0,0.1);
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%; margin:0; padding:0; overflow:hidden;}
+    
+    body{
+      font-family: "Pretendard", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex; flex-direction: column;
+    }
+
+    header{
+      height: 60px; padding: 0 20px;
+      display: flex; justify-content: space-between; align-items: center;
+      background: white; border-bottom: 1px solid #e2e8f0;
+      flex-shrink: 0; z-index: 10;
+    }
+    h1{ margin:0; font-size: 18px; font-weight: 800; color: #0f172a; }
+    .badge{
+      padding: 4px 8px; background: #eff6ff; border-radius: 6px;
+      font-size: 12px; font-weight: 700; color: var(--primary);
+    }
+
+    .stage {
+      flex: 1; width: 100%; position: relative;
+      display: flex; align-items: center; justify-content: center;
+      background: #eff6ff; /* v14.0 확인용 배경 */
+      overflow: hidden;
+    }
+
+    svg { width: 100%; height: 100%; overflow: visible; }
+
+    /* 스타일 */
+    .comp-box { fill: #ffffff; stroke: var(--stroke-color); stroke-width: 2; rx: 8; transition: all 0.3s; }
+    .tank-box { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; rx: 6; transition: all 0.3s; }
+    .zone-box { fill: none; stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 4 4; rx: 10; }
+
+    /* 하이라이트 */
+    .hl-cold { stroke: var(--cold) !important; stroke-width: 4 !important; filter: drop-shadow(0 0 8px rgba(59,130,246,0.5)); }
+    .hl-hot { stroke: var(--hot) !important; stroke-width: 4 !important; filter: drop-shadow(0 0 8px rgba(249,115,22,0.5)); }
+    .hl-drain { stroke: var(--drain) !important; stroke-width: 4 !important; filter: drop-shadow(0 0 8px rgba(16,185,129,0.5)); }
+
+    /* 텍스트 */
+    .label { fill: #1e293b; font-size: 18px; font-weight: 800; }
+    .sublabel { fill: #64748b; font-size: 14px; font-weight: 600; }
+    .txt-tank { font-size: 15px; font-weight: 700; fill: #475569; text-anchor: middle; dominant-baseline: middle; }
+
+    /* 배관 */
+    .pipe-bg { fill: none; stroke: var(--gray-line); stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; }
+    .pipe-active {
+      fill: none; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round;
+      stroke-dasharray: 12 16; opacity: 0; transition: opacity 0.3s;
+    }
+    .flow-on { opacity: 1; animation: flowDash 0.6s linear infinite; }
+    @keyframes flowDash { from { stroke-dashoffset: 28; } to { stroke-dashoffset: 0; } }
+    
+    .color-cold { stroke: var(--cold); }
+    .color-hot { stroke: var(--hot); }
+    .color-drain { stroke: var(--drain); }
+
+    /* [수정된 펌프 스타일] */
+    .pump-circle { fill: #ffffff; stroke: #475569; stroke-width: 2.5; }
+    .pump-tri { fill: #475569; }
+    
+    /* 애니메이션 클래스는 이제 내부 그룹(Inner)에만 적용됨 */
+    .pump-active .pump-circle { 
+      stroke: var(--drain); fill: #ecfdf5; 
+      filter: drop-shadow(0 0 8px rgba(16,185,129,0.5)); 
+    }
+    .pump-active .pump-tri { fill: var(--drain); }
+    
+    /* 진동: translate(0,0) -> (1,0)으로 움직여도 부모 그룹 좌표(220,480) 내에서 움직임 */
+    .pump-active { 
+      animation: pumpVib 0.1s linear infinite alternate; 
+      transform-box: fill-box; transform-origin: center; 
+    }
+    @keyframes pumpVib { 
+      from { transform: translate(0,0); } 
+      to { transform: translate(1px, 0); } 
+    }
+
+    .tank-fill { transition: fill 0.5s; }
+    .tank-fill.fill-cold { fill: #dbeafe; }
+    .tank-fill.fill-hot { fill: #ffedd5; }
+    .sump-water { fill: #bbf7d0; transition: height 0.5s, y 0.5s; }
+
+    .bottom-sheet {
+      background: var(--glass); backdrop-filter: blur(10px);
+      border-top: 1px solid rgba(0,0,0,0.05); border-radius: 20px 20px 0 0;
+      box-shadow: var(--shadow); padding: 20px; padding-bottom: max(20px, env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 12px; z-index: 20;
+    }
+    .step-badge {
+      display: inline-block; font-size: 11px; font-weight: 700; color: var(--primary);
+      background: #eff6ff; padding: 4px 8px; border-radius: 4px; margin-bottom: 6px;
+    }
+    .caption-title { font-size: 18px; font-weight: 800; color: #1e293b; margin: 0 0 4px 0; }
+    .caption-desc { font-size: 14px; color: #475569; line-height: 1.4; word-break: keep-all; }
+    .controls { display: flex; gap: 10px; width: 100%; }
+    button {
+      flex: 1; background: white; border: 1px solid #cbd5e1; padding: 12px 0;
+      border-radius: 12px; cursor: pointer; font-size: 14px; font-weight: 600; color: #475569;
+      transition: all 0.2s;
+    }
+    button:active { background: #f1f5f9; transform: scale(0.98); }
+    button.primary { background: var(--primary); color: white; border-color: var(--primary); }
+
+    @media (max-width: 768px) {
+      .pipe-bg, .pipe-active { stroke-width: 10px; }
+      .label { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>비휴전 냉각기 시스템</h1>
+    <div class="badge">v14.0 Fixed</div>
+  </header>
+
+  <div class="stage">
+    <svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet">
+      
+      <path class="pipe-bg" d="M150 140 L260 140 L260 200" />
+      <path class="pipe-bg" d="M400 220 C450 220, 480 140, 600 140" />
+      <path class="pipe-bg" d="M400 250 C430 250, 450 260, 600 260" />
+      <path class="pipe-bg" d="M400 280 C420 280, 420 380, 600 380" />
+      <path class="pipe-bg" d="M940 140 C850 140, 800 340, 400 340" />
+      <path class="pipe-bg" d="M940 260 C850 260, 800 370, 400 370" />
+      <path class="pipe-bg" d="M940 380 C850 380, 800 400, 400 400" />
+      <path class="pipe-bg" d="M260 420 L260 480 L180 480" />
+
+      <path id="f_in" class="pipe-active color-cold" d="M150 140 L260 140 L260 200" />
+      <path id="f_sup1" class="pipe-active color-cold" d="M400 220 C450 220, 480 140, 600 140" />
+      <path id="f_sup2" class="pipe-active color-cold" d="M400 250 C430 250, 450 260, 600 260" />
+      <path id="f_sup3" class="pipe-active color-cold" d="M400 280 C420 280, 420 380, 600 380" />
+      <path id="f_ret1" class="pipe-active color-hot" d="M940 140 C850 140, 800 340, 400 340" />
+      <path id="f_ret2" class="pipe-active color-hot" d="M940 260 C850 260, 800 370, 400 370" />
+      <path id="f_ret3" class="pipe-active color-hot" d="M940 380 C850 380, 800 400, 400 400" />
+      <path id="f_drain" class="pipe-active color-drain" d="M260 420 L260 480 L180 480" />
+
+      <g id="grp_tap" transform="translate(40, 100)">
+        <rect id="box_tap" class="comp-box" width="140" height="80" />
+        <text class="label" x="20" y="35">상수도</text>
+        <text class="sublabel" x="20" y="60">급수구(30)</text>
+      </g>
+
+      <g id="grp_header" transform="translate(260, 180)">
+        <rect id="box_header" class="comp-box" width="140" height="240" />
+        <text class="label" x="20" y="35">임시 헤더</text>
+        <g transform="translate(15, 50)">
+          <rect id="t_cold" class="tank-box tank-fill" width="110" height="80" />
+          <text class="txt-tank" x="55" y="40">냉수 저장</text>
+        </g>
+        <g transform="translate(15, 145)">
+          <rect id="t_hot" class="tank-box tank-fill" width="110" height="80" />
+          <text class="txt-tank" x="55" y="40">온수 저장</text>
+        </g>
+      </g>
+
+      <g id="grp_hx1" transform="translate(600, 100)">
+        <rect id="box_hx1" class="comp-box" width="340" height="80" />
+        <text class="label" x="20" y="45">열교환기 #1</text>
+        <path d="M140 20 H300 M140 40 H300 M140 60 H300" stroke="#cbd5e1" stroke-width="2" />
+      </g>
+      <g id="grp_hx2" transform="translate(600, 220)">
+        <rect id="box_hx2" class="comp-box" width="340" height="80" />
+        <text class="label" x="20" y="45">열교환기 #2</text>
+        <path d="M140 20 H300 M140 40 H300 M140 60 H300" stroke="#cbd5e1" stroke-width="2" />
+      </g>
+      <g id="grp_hx3" transform="translate(600, 340)">
+        <rect id="box_hx3" class="comp-box" width="340" height="80" />
+        <text class="label" x="20" y="45">열교환기 #3</text>
+        <path d="M140 20 H300 M140 40 H300 M140 60 H300" stroke="#cbd5e1" stroke-width="2" />
+      </g>
+
+      <g transform="translate(40, 430)">
+        <rect class="zone-box" width="200" height="100" />
+        <text class="sublabel" x="20" y="25">펌프실(40)</text>
+        <g id="grp_sump" transform="translate(20, 40)">
+          <rect id="box_sump" class="comp-box" width="80" height="40" />
+          <rect id="t_sump" class="sump-water" x="2" y="40" width="76" height="0" />
+          <rect class="comp-box" width="80" height="40" fill="none" />
+          <text class="sublabel" x="40" y="25" text-anchor="middle">집수정</text>
+        </g>
+      </g>
+
+      <g id="pumpWrapper" transform="translate(220, 480)">
+        <g id="pumpInner">
+          <circle class="pump-circle" cx="0" cy="0" r="16" />
+          <path class="pump-tri" d="M4,-6 L-8,0 L4,6 Z" />
+        </g>
+      </g>
+
+    </svg>
+  </div>
+
+  <div class="bottom-sheet">
+    <div class="info-area">
+      <div class="step-badge" id="stepBadge">STEP 1</div>
+      <h2 class="caption-title" id="ptTitle">전체 시스템 개요</h2>
+      <div class="caption-desc" id="ptDesc">설명 텍스트</div>
+    </div>
+    <div class="controls">
+      <button onclick="changeStep(-1)">◀ 이전</button>
+      <button id="playBtn" onclick="togglePlay()" class="primary">자동 재생</button>
+      <button onclick="changeStep(1)">다음 ▶</button>
+    </div>
+  </div>
+
+<script>
+  const steps = [
+    { title: "전체 시스템 개요", desc: "비상 시 <b>상수도 직수</b>를 이용하여 변압기를 중단 없이 냉각합니다." },
+    { title: "상수도 유입", desc: "상수도 밸브가 열리고, <b>차가운 냉수</b>가 임시 헤더로 유입됩니다." },
+    { title: "냉수 저장", desc: "유입된 물이 <b>냉수 저장부</b>에 차오르며, 각 변압기로 보낼 수압을 형성합니다." },
+    { title: "열교환기 공급", desc: "헤더에서 3개의 라인을 통해 <b>각 변압기 열교환기</b>로 냉수가 공급됩니다." },
+    { title: "열교환 수행", desc: "냉수가 코일을 통과하며 열을 식히고, <b>뜨거운 온수</b>로 변합니다." },
+    { title: "온수 환수", desc: "열교환을 마친 온수는 다시 <b>온수 저장부</b>로 회수됩니다." },
+    { title: "배수 (펌프 가동)", desc: "하단의 <b>배수 펌프</b>가 작동하여, 온수를 집수정으로 신속하게 배출합니다." },
+    { title: "Bypass 운전", desc: "냉각탑 재가동 시까지 이 과정(유입→열교환→배수 펌핑)을 <b>연속 수행</b>합니다." },
+    { title: "자동 제어", desc: "<b>고정형 장비</b>는 온도 변화를 자동으로 감지하여, 펌프를 포함한 전체 과정을 자동 제어합니다." }
+  ];
+
+  let curr = 0;
+  let playing = false;
+  let timer = null;
+
+  const $ = (id) => document.getElementById(id);
+  const ui = {
+    badge: $("stepBadge"), title: $("ptTitle"), desc: $("ptDesc"), play: $("playBtn"),
+    tankCold: $("t_cold"), tankHot: $("t_hot"), sump: $("t_sump"), 
+    // [V14 FIX] 펌프 내부 그룹 선택
+    pump: $("pumpInner"), 
+    boxTap: $("box_tap"), boxHeader: $("box_header"), 
+    boxHX: [ $("box_hx1"), $("box_hx2"), $("box_hx3") ], 
+    boxSump: $("box_sump"),
+    pipes: {
+      in: $("f_in"),
+      sup: [ $("f_sup1"), $("f_sup2"), $("f_sup3") ],
+      ret: [ $("f_ret1"), $("f_ret2"), $("f_ret3") ],
+      drain: $("f_drain")
+    }
+  };
+
+  function update() {
+    const s = steps[curr];
+    ui.badge.textContent = `STEP ${curr + 1} / 9`;
+    ui.title.innerText = s.title;
+    ui.desc.innerHTML = s.desc;
+
+    resetVisuals();
+
+    if(curr >= 1) { 
+      setFlow(ui.pipes.in, true); 
+      setHighlight(ui.boxTap, "cold");
+    }
+    
+    if(curr >= 2) {
+      ui.tankCold.classList.add("fill-cold");
+      setHighlight(ui.boxHeader, "cold");
+    }
+
+    if(curr >= 3) {
+      ui.pipes.sup.forEach(p => setFlow(p, true));
+      setHighlight(ui.boxHeader, "cold");
+      ui.boxHX.forEach(b => setHighlight(b, "cold"));
+    }
+
+    if(curr >= 4) {
+      ui.boxHX.forEach(b => setHighlight(b, "hot")); 
+    }
+
+    if(curr >= 5) {
+      ui.pipes.ret.forEach(p => setFlow(p, true));
+      ui.tankHot.classList.add("fill-hot");
+      setHighlight(ui.boxHeader, "hot");
+    }
+
+    if(curr >= 6) {
+      setFlow(ui.pipes.drain, true);
+      ui.pump.classList.add("pump-active"); // 애니메이션 적용
+      ui.sump.setAttribute("y", "10");
+      ui.sump.setAttribute("height", "30");
+      setHighlight(ui.boxSump, "drain");
+    }
+
+    if(curr >= 7) {
+      setFlow(ui.pipes.in, true);
+      ui.tankCold.classList.add("fill-cold");
+      ui.pipes.sup.forEach(p => setFlow(p, true));
+      ui.pipes.ret.forEach(p => setFlow(p, true));
+      ui.tankHot.classList.add("fill-hot");
+      setFlow(ui.pipes.drain, true);
+      ui.pump.classList.add("pump-active");
+      ui.sump.setAttribute("y", "10");
+      ui.sump.setAttribute("height", "30");
+      
+      setHighlight(ui.boxTap, "cold");
+      setHighlight(ui.boxHeader, "hot");
+      ui.boxHX.forEach(b => setHighlight(b, "hot"));
+      setHighlight(ui.boxSump, "drain");
+    }
+  }
+
+  function resetVisuals() {
+    document.querySelectorAll('.pipe-active').forEach(p => p.classList.remove("flow-on"));
+    ui.tankCold.classList.remove("fill-cold");
+    ui.tankHot.classList.remove("fill-hot");
+    ui.pump.classList.remove("pump-active"); // 클래스 제거
+    ui.sump.setAttribute("y", "40");
+    ui.sump.setAttribute("height", "0");
+    
+    document.querySelectorAll('.comp-box').forEach(b => {
+      b.classList.remove("hl-cold", "hl-hot", "hl-drain");
+    });
+  }
+
+  function setFlow(el, on) {
+    if(on) el.classList.add("flow-on");
+  }
+  
+  function setHighlight(el, type) {
+    if(!el) return;
+    el.classList.remove("hl-cold", "hl-hot", "hl-drain");
+    el.classList.add(`hl-${type}`);
+  }
+
+  function changeStep(dir) {
+    const next = curr + dir;
+    if (next >= 0 && next < steps.length) {
+      curr = next; playing = false; update();
+    }
+  }
+
+  function togglePlay() {
+    playing = !playing;
+    ui.play.textContent = playing ? "일시 정지" : "자동 재생";
+    if (playing) {
+      timer = setInterval(() => {
+        if (curr < steps.length - 1) { curr++; update(); }
+        else { togglePlay(); }
+      }, 2000);
+    } else {
+      clearInterval(timer);
+    }
+  }
+
+  update();
+</script>
+</body>
+</html>
